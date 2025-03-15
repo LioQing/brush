@@ -6,11 +6,7 @@ use std::{
 
 use super::DataStream;
 use crate::{
-    Dataset, LoadDataseConfig,
-    brush_vfs::BrushVfs,
-    formats::{clamp_img_to_max_size, find_mask_path, load_image},
-    splat_import::SplatMessage,
-    stream_fut_parallel,
+    brush_vfs::BrushVfs, formats::{clamp_img_to_max_size, find_depth_path, find_mask_path, load_depth, load_image}, splat_import::SplatMessage, stream_fut_parallel, Dataset, LoadDataseConfig
 };
 use anyhow::{Context, Result};
 use async_fn_stream::try_fn_stream;
@@ -39,16 +35,21 @@ fn find_base_path(archive: &BrushVfs, search_path: &str) -> Option<PathBuf> {
     None
 }
 
-fn find_mask_and_img(vfs: &BrushVfs, paths: &[PathBuf]) -> Result<(PathBuf, Option<PathBuf>)> {
+fn find_img_mask_depth(vfs: &BrushVfs, paths: &[PathBuf]) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
     let mut path_masks = HashMap::new();
     let mut masks = vec![];
+    let mut depths = vec![];
 
     // First pass: collect images & masks.
     for path in paths {
         let mask = find_mask_path(vfs, path);
-        path_masks.insert(path.clone(), mask.clone());
+        let depth = find_depth_path(vfs, path);
+        path_masks.insert(path.clone(), (mask.clone(), depth.clone()));
         if let Some(mask_path) = mask {
             masks.push(mask_path);
+        }
+        if let Some(depth_path) = depth {
+            depths.push(depth_path);
         }
     }
 
@@ -57,10 +58,16 @@ fn find_mask_and_img(vfs: &BrushVfs, paths: &[PathBuf]) -> Result<(PathBuf, Opti
         path_masks.remove(&mask);
     }
 
+    // Remove depths from candidates - shouldn't count as an input image.
+    for depth in depths {
+        path_masks.remove(&depth);
+    }
+
     // Sort and return the first candidate (alphabetically).
     path_masks
         .into_iter()
         .min_by_key(|kv| kv.0.clone())
+        .map(|(img, (mask, depth))| (img, mask, depth))
         .context("No candidates found")
 }
 
@@ -127,14 +134,25 @@ async fn read_views(
                     .filter(|p| p.ends_with(&img_info.name))
                     .collect();
 
-                let (path, mask_path) = find_mask_and_img(&vfs, &img_paths)
+                let (path, mask_path, depth_path) = find_img_mask_depth(&vfs, &img_paths)
                     .with_context(|| format!("Failed to find image {}", img_info.name))?;
 
                 let (image, img_type) = load_image(&mut vfs, &path, mask_path.as_deref())
                     .await
                     .with_context(|| format!("Failed to load image {}", img_info.name))?;
 
+                let depth = if let Some(depth_path) = depth_path.as_ref() {
+                    Some(
+                        load_depth(&mut vfs, depth_path)
+                            .await
+                            .with_context(|| format!(
+                                "Failed to load depth for image {}", img_info.name
+                            ))?
+                    )
+                } else { None };
+
                 let image = clamp_img_to_max_size(Arc::new(image), load_args.max_resolution);
+                let depth = depth.map(|d| clamp_img_to_max_size(Arc::new(d), load_args.max_resolution));
 
                 // Convert w2c to c2w.
                 let world_to_cam =
@@ -149,6 +167,7 @@ async fn read_views(
                     camera,
                     image,
                     img_type,
+                    depth,
                 };
                 Ok(view)
             }

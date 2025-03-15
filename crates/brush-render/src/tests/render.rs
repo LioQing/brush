@@ -28,7 +28,7 @@ fn renders_at_all() {
             .repeat_dim(0, num_points);
     let sh_coeffs = Tensor::<Back, 3>::ones([num_points, 1, 3], &device);
     let raw_opacity = Tensor::<Back, 1>::zeros([num_points], &device);
-    let (output, aux) = <Back as SplatForward<Back>>::render_splats(
+    let (output, output_depth, aux) = <Back as SplatForward<Back>>::render_splats(
         &cam,
         img_size,
         means.into_primitive().tensor(),
@@ -41,9 +41,12 @@ fn renders_at_all() {
     aux.debug_assert_valid();
 
     let output: Tensor<Back, 3> = Tensor::from_primitive(TensorPrimitive::Float(output));
+    let output_depth: Tensor<Back, 2> = Tensor::from_primitive(TensorPrimitive::Float(output_depth));
     let rgb = output.clone().slice([0..32, 0..32, 0..3]);
     let alpha = output.slice([0..32, 0..32, 3..4]);
+    let depth = output_depth.slice([0..32, 0..32]);
     let rgb_mean = rgb.mean().to_data().as_slice::<f32>().expect("Wrong type")[0];
+    let depth_mean = depth.mean().to_data().as_slice::<f32>().expect("Wrong type")[0];
     let alpha_mean = alpha
         .mean()
         .to_data()
@@ -51,4 +54,5 @@ fn renders_at_all() {
         .expect("Wrong type")[0];
     assert_approx_eq!(rgb_mean, 0.0, 1e-5);
     assert_approx_eq!(alpha_mean, 0.0);
+    assert_approx_eq!(depth_mean, 0.0);
 }

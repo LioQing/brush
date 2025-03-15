@@ -54,7 +54,7 @@ pub(crate) fn render_forward<BT: BoolElement>(
     sh_coeffs: CubeTensor<WgpuRuntime>,
     opacities: CubeTensor<WgpuRuntime>,
     bwd_info: bool,
-) -> (CubeTensor<WgpuRuntime>, RenderAux<BBase<BT>>) {
+) -> (CubeTensor<WgpuRuntime>, CubeTensor<WgpuRuntime>, RenderAux<BBase<BT>>) {
     assert!(
         img_size[0] > 0 && img_size[1] > 0,
         "Can't render images with 0 size."
@@ -262,6 +262,13 @@ pub(crate) fn render_forward<BT: BoolElement>(
 
     let _span = tracing::trace_span!("Rasterize", sync_burn = true).entered();
 
+    let out_depth = create_tensor(
+        [img_size.y as usize, img_size.x as usize],
+        device,
+        client,
+        DType::F32,
+    );
+
     let out_dim = if bwd_info {
         4
     } else {
@@ -281,6 +288,7 @@ pub(crate) fn render_forward<BT: BoolElement>(
         compact_gid_from_isect.handle.clone().binding(),
         tile_offsets.handle.clone().binding(),
         projected_splats.handle.clone().binding(),
+        out_depth.handle.clone().binding(),
         out_img.handle.clone().binding(),
     ];
 
@@ -323,6 +331,7 @@ pub(crate) fn render_forward<BT: BoolElement>(
 
     (
         out_img,
+        out_depth,
         RenderAux {
             uniforms_buffer,
             num_visible,

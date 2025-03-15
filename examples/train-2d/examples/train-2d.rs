@@ -57,6 +57,7 @@ fn spawn_train_loop(
         let batch = SceneBatch {
             gt_image: view_to_sample(&gt_view, &device).unsqueeze(),
             gt_view,
+            gt_depth: None,
         };
 
         let mut iter = 0;
@@ -123,6 +124,7 @@ impl App {
             camera,
             image: Arc::new(image),
             img_type: ViewImageType::Alpha,
+            depth: None,
         };
 
         let (sender, receiver) = tokio::sync::mpsc::channel(32);
@@ -168,7 +170,7 @@ impl eframe::App for App {
 
             let image = &self.view.image;
 
-            let (img, _) = msg.splats.render(
+            let (img, _, _) = msg.splats.render(
                 &self.view.camera,
                 glam::uvec2(image.width(), image.height()),
                 false,

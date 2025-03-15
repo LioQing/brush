@@ -32,6 +32,24 @@ pub fn view_to_sample<B: Backend>(view: &SceneView, device: &B::Device) -> Tenso
     Tensor::from_data(tensor_data, device)
 }
 
+// Converts a depth mapping to a tensor for regularization.
+pub fn try_view_to_depth<B: Backend>(view: &SceneView, device: &B::Device) -> Option<Tensor<B, 2>> {
+    let depth = view.depth.as_ref()?;
+    let (w, h) = (depth.width(), depth.height());
+
+    let tensor_data = TensorData::new(
+        depth
+            .to_luma16()
+            .into_vec()
+            .into_iter()
+            .map(|l| l as f32 / 1000.0)
+            .collect(),
+        [h as usize, w as usize],
+    );
+
+    Some(Tensor::from_data(tensor_data, device))
+}
+
 pub trait TensorDataToImage {
     fn into_image(self) -> DynamicImage;
 }

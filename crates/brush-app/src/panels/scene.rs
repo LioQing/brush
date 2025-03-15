@@ -36,6 +36,7 @@ struct ErrorDisplay {
 
 pub(crate) struct ScenePanel {
     pub(crate) backbuffer: BurnTexture,
+    pub(crate) depth_backbuffer: BurnTexture,
     pub(crate) last_draw: Option<Instant>,
 
     view_splats: Vec<Splats<<TrainBack as AutodiffBackend>::InnerBackend>>,
@@ -60,7 +61,8 @@ impl ScenePanel {
         zen: bool,
     ) -> Self {
         Self {
-            backbuffer: BurnTexture::new(renderer, device, queue),
+            backbuffer: BurnTexture::new(renderer.clone(), device.clone(), queue.clone()),
+            depth_backbuffer: BurnTexture::new(renderer, device, queue),
             last_draw: None,
             err: None,
             view_splats: vec![],
@@ -133,8 +135,9 @@ impl ScenePanel {
         // If this viewport is re-rendering.
         if size.x > 0 && size.y > 0 && dirty {
             let _span = trace_span!("Render splats").entered();
-            let (img, _) = splats.render(&context.camera, size, false);
+            let (img, depth, _) = splats.render(&context.camera, size, false);
             self.backbuffer.update_texture(img);
+            self.depth_backbuffer.update_depth_texture(depth);
         }
 
         if let Some(id) = self.backbuffer.id() {
@@ -163,6 +166,36 @@ impl ScenePanel {
                     },
                     Color32::WHITE,
                 );
+            });
+        }
+
+        if let Some(id) = self.depth_backbuffer.id() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                let max_height = ui.available_rect_before_wrap().height() -
+                    ui.text_style_height(&egui::TextStyle::Body) * 2.0;
+                let size = match (size.y as f32) < max_height {
+                    true => size.as_vec2(),
+                    false => {
+                        let scale = max_height / size.y as f32;
+                        glam::vec2(size.x as f32 * scale, max_height)
+                    }
+                };
+                let (depth_rect, _) = ui.allocate_exact_size(
+                    egui::Vec2::new(size.x, size.y),
+                    egui::Sense::empty(),
+                );
+    
+                ui.scope(|ui| {
+                    ui.painter().image(
+                        id,
+                        depth_rect,
+                        Rect {
+                            min: egui::pos2(0.0, 0.0),
+                            max: egui::pos2(1.0, 1.0),
+                        },
+                        Color32::WHITE,
+                    );
+                });
             });
         }
     }

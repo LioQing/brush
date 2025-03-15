@@ -188,6 +188,7 @@ fn read_transforms_file(
                     camera: Camera::new(translation, rotation, fovx, fovy, cuv),
                     image,
                     img_type,
+                    depth: None,
                 };
                 anyhow::Result::<SceneView>::Ok(view)
             }

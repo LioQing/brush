@@ -21,6 +21,7 @@ pub struct SceneView {
     pub camera: Camera,
     pub image: Arc<image::DynamicImage>,
     pub img_type: ViewImageType,
+    pub depth: Option<Arc<image::DynamicImage>>,
 }
 
 // Encapsulates a multi-view scene including cameras and the splats.

@@ -248,8 +248,8 @@ impl<B: Backend + SplatForward<B>> Splats<B> {
         camera: &Camera,
         img_size: glam::UVec2,
         float_buffer: bool,
-    ) -> (Tensor<B, 3>, RenderAux<B>) {
-        let (img, aux) = B::render_splats(
+    ) -> (Tensor<B, 3>, Tensor<B, 2>, RenderAux<B>) {
+        let (img, depth, aux) = B::render_splats(
             camera,
             img_size,
             self.means.val().into_primitive().tensor(),
@@ -260,9 +260,10 @@ impl<B: Backend + SplatForward<B>> Splats<B> {
             float_buffer,
         );
         let img = Tensor::from_primitive(TensorPrimitive::Float(img));
+        let depth = Tensor::from_primitive(TensorPrimitive::Float(depth));
         if cfg!(feature = "debug_validation") {
             aux.debug_assert_valid();
         }
-        (img, aux)
+        (img, depth, aux)
     }
 }

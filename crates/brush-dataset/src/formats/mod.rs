@@ -96,6 +96,26 @@ fn find_mask_path(vfs: &BrushVfs, path: &Path) -> Option<PathBuf> {
     })
 }
 
+fn find_depth_path(vfs: &BrushVfs, path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?.clean();
+    let file_stem = path.file_stem()?.to_str()?;
+    let depth_name = format!("{file_stem}_depth");
+    let depths_dir = parent.parent()?.join("depths").clean();
+    
+    vfs.file_names().find(|file| {
+        let Some(file_parent) = file.parent() else {
+            return false;
+        };
+
+        let Some(stem) = file.file_stem().and_then(|p| p.to_str()) else {
+            return false;
+        };
+
+        file_parent == parent && stem == depth_name
+            || file_parent == depths_dir && stem == file_stem
+    })
+}
+
 pub fn clamp_img_to_max_size(image: Arc<DynamicImage>, max_size: u32) -> Arc<DynamicImage> {
     if image.width() <= max_size && image.height() <= max_size {
         return image;
@@ -147,4 +167,19 @@ pub(crate) async fn load_image(
     } else {
         Ok((img, ViewImageType::Alpha))
     }
+}
+
+pub(crate) async fn load_depth(
+    vfs: &mut BrushVfs,
+    depth_path: &Path,
+) -> anyhow::Result<DynamicImage> {
+    let mut depth_bytes = vec![];
+
+    vfs.open_path(depth_path)
+        .await?
+        .read_to_end(&mut depth_bytes)
+        .await?;
+    let depth = image::load_from_memory(&depth_bytes)?;
+
+    Ok(depth)
 }

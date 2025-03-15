@@ -136,6 +136,7 @@ pub type TrainBack = Autodiff<Wgpu>;
 pub struct SceneBatch<B: Backend> {
     pub gt_image: Tensor<B, 3>,
     pub gt_view: SceneView,
+    pub gt_depth: Option<Tensor<B, 2>>,
 }
 
 #[derive(Clone)]
@@ -264,6 +265,7 @@ impl SplatTrainer {
 
         let (
             pred_image,
+            pred_depth,
             visible,
             global_from_compact_gid,
             num_visible,
@@ -280,8 +282,10 @@ impl SplatTrainer {
                 current_opacity.clone().into_primitive().tensor(),
             );
             let img = Tensor::from_primitive(TensorPrimitive::Float(diff_out.img));
+            let depth = Tensor::from_primitive(TensorPrimitive::Float(diff_out.depth));
             (
                 img,
+                depth,
                 diff_out.aux.visible,
                 diff_out.aux.global_from_compact_gid,
                 diff_out.aux.num_visible,
@@ -308,21 +312,32 @@ impl SplatTrainer {
             l1_rgb
         };
 
+        let loss = if let Some(gt_depth) = &batch.gt_depth {
+            let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
+            let gt_depth = gt_depth.clone().slice([0..img_h, 0..img_w]);
+
+            let depth_err = (pred_depth - gt_depth).abs();
+            // println!("Depth/RGB error: {}/{}", depth_err.clone().mean().into_scalar(), total_err.clone().mean().into_scalar());
+            total_err + depth_err.reshape([0, 0, 1]).repeat_dim(2, 3)
+        } else {
+            total_err
+        };
+
         let loss = if batch.gt_view.image.color().has_alpha() {
             let alpha_input = batch.gt_image.clone().slice([0..img_h, 0..img_w, 3..4]);
 
             match batch.gt_view.img_type {
                 // In masked mode, weigh the errors by the alpha channel.
-                ViewImageType::Masked => (total_err * alpha_input).mean(),
+                ViewImageType::Masked => (loss * alpha_input).mean(),
                 // In alpha mode, add the l1 error of the alpha channel to the total error.
                 ViewImageType::Alpha => {
                     let pred_alpha = pred_image.clone().slice([0..img_h, 0..img_w, 3..4]);
-                    total_err.mean()
+                    loss.mean()
                         + (alpha_input - pred_alpha).abs().mean() * self.config.match_alpha_weight
                 }
             }
         } else {
-            total_err.mean()
+            loss.mean()
         };
 
         let opac_loss_weight = self.config.opac_loss_weight;

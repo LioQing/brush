@@ -1,4 +1,4 @@
-use brush_train::image::view_to_sample;
+use brush_train::image::{try_view_to_depth, view_to_sample};
 use brush_train::scene::Scene;
 use brush_train::train::SceneBatch;
 use burn::prelude::Backend;
@@ -24,7 +24,7 @@ impl<B: Backend> SceneLoader<B> {
             let mut shuf_indices = vec![];
 
             loop {
-                let (gt_image, gt_view) = {
+                let (gt_image, gt_depth, gt_view) = {
                     let index = shuf_indices.pop().unwrap_or_else(|| {
                         shuf_indices = (0..scene.views.len()).collect();
                         shuf_indices.shuffle(&mut rng);
@@ -33,10 +33,10 @@ impl<B: Backend> SceneLoader<B> {
                             .expect("Need at least one view in dataset")
                     });
                     let view = scene.views[index].clone();
-                    (view_to_sample(&view, &device), view)
+                    (view_to_sample(&view, &device), try_view_to_depth(&view, &device), view)
                 };
 
-                let scene_batch = SceneBatch { gt_image, gt_view };
+                let scene_batch = SceneBatch { gt_image, gt_view, gt_depth };
 
                 if tx.send(scene_batch).await.is_err() {
                     break;

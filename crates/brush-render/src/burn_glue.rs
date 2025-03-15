@@ -24,7 +24,7 @@ impl<BT: BoolElement> SplatForward<Self> for BBase<BT> {
         sh_coeffs: FloatTensor<Self>,
         opacity: FloatTensor<Self>,
         bwd_info: bool,
-    ) -> (FloatTensor<Self>, RenderAux<Self>) {
+    ) -> (FloatTensor<Self>, FloatTensor<Self>, RenderAux<Self>) {
         render_forward(
             camera, img_size, means, log_scales, quats, sh_coeffs, opacity, bwd_info,
         )
@@ -41,7 +41,7 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
         sh_coeffs: FloatTensor<Self>,
         opacity: FloatTensor<Self>,
         bwd_info: bool,
-    ) -> (FloatTensor<Self>, RenderAux<Self>) {
+    ) -> (FloatTensor<Self>, FloatTensor<Self>, RenderAux<Self>) {
         struct CustomOp<BT: BoolElement> {
             cam: Camera,
             img_size: glam::UVec2,
@@ -66,12 +66,13 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
                     tile_offsets,
                     compact_gid_from_isect,
                     global_from_compact_gid,
+                    out_depth,
                     out_img,
                     visible,
                     final_index,
                 ] = outputs;
 
-                let (img, aux) = BBase::<BT>::render_splats(
+                let (img, depth, aux) = BBase::<BT>::render_splats(
                     &self.cam,
                     self.img_size,
                     h.get_float_tensor::<BBase<BT>>(&means),
@@ -83,6 +84,7 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
                 );
 
                 // Register output.
+                h.register_float_tensor::<BBase<BT>>(&out_depth.id, depth);
                 h.register_float_tensor::<BBase<BT>>(&out_img.id, img);
                 h.register_float_tensor::<BBase<BT>>(&projected_splats.id, aux.projected_splats);
                 h.register_int_tensor::<BBase<BT>>(&uniforms_buffer.id, aux.uniforms_buffer);
@@ -112,6 +114,11 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
         let uniforms_size = size_of::<shaders::helpers::RenderUniforms>() / 4;
         let tile_bounds = calc_tile_bounds(img_size);
         let max_intersects = max_intersections(img_size, num_points as u32);
+
+        let out_depth = client.tensor_uninitialized(
+            vec![img_size.y as usize, img_size.x as usize],
+            DType::F32,
+        );
 
         // If render_u32_buffer is true, we render a packed buffer of u32 values, otherwise
         // render RGBA f32 values.
@@ -164,6 +171,7 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
                 aux.tile_offsets.to_ir_out(),
                 aux.compact_gid_from_isect.to_ir_out(),
                 aux.global_from_compact_gid.to_ir_out(),
+                out_depth.to_ir_out(),
                 out_img.to_ir_out(),
                 aux.visible.to_ir_out(),
                 aux.final_index.to_ir_out(),
@@ -179,6 +187,6 @@ impl<BT: BoolElement> SplatForward<Self> for Fusion<BBase<BT>> {
         };
 
         client.register(vec![stream], OperationIr::Custom(desc), op);
-        (out_img, aux)
+        (out_img, out_depth, aux)
     }
 }

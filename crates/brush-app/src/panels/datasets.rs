@@ -1,6 +1,7 @@
 use crate::app::{AppContext, AppPanel};
 use brush_process::process_loop::ProcessMessage;
 use brush_train::scene::{Scene, SceneView, ViewImageType, ViewType};
+use brush_ui::burn_texture::BurnTexture;
 use egui::{Slider, TextureHandle, TextureOptions, pos2};
 
 struct SelectedView {
@@ -29,6 +30,7 @@ impl SelectedView {
 pub(crate) struct DatasetPanel {
     view_type: ViewType,
     selected_view: Option<SelectedView>,
+    selected_depth_view: Option<SelectedView>,
 }
 
 impl DatasetPanel {
@@ -36,6 +38,7 @@ impl DatasetPanel {
         Self {
             view_type: ViewType::Train,
             selected_view: None,
+            selected_depth_view: None,
         }
     }
 }
@@ -87,6 +90,34 @@ impl AppPanel for DatasetPanel {
                 } else {
                     egui::ColorImage::from_rgb(img_size, &image.to_rgb8().into_vec())
                 };
+                let depth_img = if let Some(depth) = view.depth.as_ref() {
+                    let depth = depth.to_luma16().into_vec();
+                    
+                    let mut data = vec![0xff000000u32; img_size[0] * img_size[1]];
+                    for (d, rgba) in depth.iter().zip(data.iter_mut()) {
+                        let d = *d as f32 / 1000.0; // Convert from mm to m.
+                        let d = d.clamp(
+                            BurnTexture::DEPTH_GRADIENTS.first().unwrap().0,
+                            BurnTexture::DEPTH_GRADIENTS.last().unwrap().0,
+                        );
+                        for i in 0..BurnTexture::DEPTH_GRADIENTS.len() - 1 {
+                            let (d0, c0) = BurnTexture::DEPTH_GRADIENTS[i];
+                            let (d1, c1) = BurnTexture::DEPTH_GRADIENTS[i + 1];
+                            if d >= d0 && d < d1 {
+                                let t = (d - d0) / (d1 - d0);
+                                let c = c0.lerp(c1, t).as_uvec3();
+                                *rgba = c.x + c.y * 0x0100 + c.z * 0x010000 + 0xff000000;
+                                break;
+                            }
+                        }
+                    }
+
+                    let data = data.iter().map(|&x| x.to_le_bytes()).flatten().collect::<Vec<_>>();
+
+                    Some(egui::ColorImage::from_rgba_unmultiplied(img_size, &data))
+                } else {
+                    None
+                };
 
                 self.selected_view = Some(SelectedView {
                     index: *nearest,
@@ -94,6 +125,15 @@ impl AppPanel for DatasetPanel {
                     texture_handle: ui.ctx().load_texture(
                         "nearest_view_tex",
                         color_img,
+                        TextureOptions::default(),
+                    ),
+                });
+                self.selected_depth_view = depth_img.map(|depth_img| SelectedView {
+                    index: *nearest,
+                    view_type: self.view_type,
+                    texture_handle: ui.ctx().load_texture(
+                        "nearest_depth_view_tex",
+                        depth_img,
                         TextureOptions::default(),
                     ),
                 });
@@ -126,6 +166,8 @@ impl AppPanel for DatasetPanel {
                     }
                 }
 
+                ui.allocate_rect(rect, egui::Sense::click());
+
                 ui.painter().image(
                     texture_handle.id(),
                     rect,
@@ -133,7 +175,28 @@ impl AppPanel for DatasetPanel {
                     egui::Color32::WHITE,
                 );
 
-                ui.allocate_rect(rect, egui::Sense::click());
+                if let Some(selected_depth) = self.selected_depth_view.as_ref() {
+                    let max_height = ui.available_rect_before_wrap().height() -
+                        ui.text_style_height(&egui::TextStyle::Body) * 2.0;
+                    let size = match size.y < max_height {
+                        true => size,
+                        false => {
+                            let scale = max_height / size.y;
+                            egui::vec2(size.x * scale, max_height)
+                        }
+                    };
+                    let (depth_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(size.x, size.y),
+                        egui::Sense::empty(),
+                    );
+
+                    ui.painter().image(
+                        selected_depth.texture_handle.id(),
+                        depth_rect,
+                        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
 
                 ui.horizontal(|ui| {
                     let mut interacted = false;

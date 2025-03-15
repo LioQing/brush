@@ -161,6 +161,7 @@ impl<B: Backend + SplatBackwardOps<B>> Backward<B, NUM_ARGS> for RenderBackwards
 
 pub struct SplatOutputDiff<B: Backend> {
     pub img: FloatTensor<B>,
+    pub depth: FloatTensor<B>,
     pub aux: RenderAux<B>,
     pub refine_weight_holder: Tensor<B, 1>,
 }
@@ -198,7 +199,7 @@ impl<B: Backend + SplatBackwardOps<B> + SplatForward<B>, C: CheckpointStrategy>
             .stateful();
 
         // Render complete forward pass.
-        let (out_img, aux) = <B as SplatForward<B>>::render_splats(
+        let (out_img, out_depth, aux) = <B as SplatForward<B>>::render_splats(
             camera,
             img_size,
             means.clone().into_primitive(),
@@ -246,6 +247,7 @@ impl<B: Backend + SplatBackwardOps<B> + SplatForward<B>, C: CheckpointStrategy>
 
                 SplatOutputDiff {
                     img: out_img,
+                    depth: FloatTensor::<Self>::new(out_depth),
                     aux: wrapped_aux,
                     refine_weight_holder,
                 }
@@ -255,6 +257,7 @@ impl<B: Backend + SplatBackwardOps<B> + SplatForward<B>, C: CheckpointStrategy>
                 // keeping any state.
                 SplatOutputDiff {
                     img: prep.finish(out_img),
+                    depth: FloatTensor::<Self>::new(out_depth),
                     aux: wrapped_aux,
                     refine_weight_holder,
                 }

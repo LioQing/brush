@@ -191,6 +191,7 @@ pub trait SplatForward<B: Backend> {
     /// The [`xy_grad_dummy`] variable is only used to carry screenspace xy gradients.
     /// This function can optionally render a "u32" buffer, which is a packed RGBA (8 bits per channel)
     /// buffer. This is useful when the results need to be displayed immediately.
+    /// It also renders a depth buffer for regularization.
     fn render_splats(
         camera: &Camera,
         img_size: glam::UVec2,
@@ -200,7 +201,7 @@ pub trait SplatForward<B: Backend> {
         sh_coeffs: FloatTensor<B>,
         opacities: FloatTensor<B>,
         bwd_info: bool,
-    ) -> (FloatTensor<B>, RenderAux<B>);
+    ) -> (FloatTensor<B>, FloatTensor<B>, RenderAux<B>);
 }
 
 fn burn_options() -> RuntimeOptions {

@@ -243,10 +243,19 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
     var color = sh_coeffs_to_color(sh_degree, viewdir, sh) + vec3f(0.5);
 
+    const depth_pt_std_score = 2.0;
+    let depth_pt_dir = -viewdir;
+    let depth_pt_inv_rotated = transpose(helpers::quat_to_mat(quat)) * depth_pt_dir;
+    let depth_pt_inv_scaled = depth_pt_inv_rotated.xyz / scale;
+    let depth_pt_recip = 1.0 / dot(depth_pt_inv_scaled, depth_pt_inv_scaled);
+    let depth_pt = mean + depth_pt_dir * depth_pt_recip * depth_pt_std_score;
+    let depth = length(depth_pt - uniforms.camera_position.xyz);
+
     projected[compact_gid] = helpers::create_projected_splat(
         mean2d,
         vec3f(conic[0][0], conic[0][1], conic[1][1]),
-        vec4f(color, opac)
+        vec4f(color, opac),
+        depth,
     );
 
     let radius = helpers::radius_from_cov(cov2d, opac);
