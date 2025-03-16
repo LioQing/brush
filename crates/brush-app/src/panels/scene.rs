@@ -1,6 +1,6 @@
 use brush_dataset::splat_export;
 use brush_process::process_loop::{ControlMessage, ProcessMessage};
-use brush_train::{scene::ViewImageType, train::TrainBack};
+use brush_train::{scene::ViewImageType, train::{sobel, TrainBack, SOBEL_SCALE}};
 use brush_ui::burn_texture::BurnTexture;
 use burn::tensor::backend::AutodiffBackend;
 use core::f32;
@@ -37,6 +37,7 @@ struct ErrorDisplay {
 pub(crate) struct ScenePanel {
     pub(crate) backbuffer: BurnTexture,
     pub(crate) depth_backbuffer: BurnTexture,
+    pub(crate) sobel_backbuffer: BurnTexture,
     pub(crate) last_draw: Option<Instant>,
 
     view_splats: Vec<Splats<<TrainBack as AutodiffBackend>::InnerBackend>>,
@@ -62,7 +63,8 @@ impl ScenePanel {
     ) -> Self {
         Self {
             backbuffer: BurnTexture::new(renderer.clone(), device.clone(), queue.clone()),
-            depth_backbuffer: BurnTexture::new(renderer, device, queue),
+            depth_backbuffer: BurnTexture::new(renderer.clone(), device.clone(), queue.clone()),
+            sobel_backbuffer: BurnTexture::new(renderer, device, queue),
             last_draw: None,
             err: None,
             view_splats: vec![],
@@ -137,7 +139,8 @@ impl ScenePanel {
             let _span = trace_span!("Render splats").entered();
             let (img, depth, _) = splats.render(&context.camera, size, false);
             self.backbuffer.update_texture(img);
-            self.depth_backbuffer.update_depth_texture(depth);
+            self.depth_backbuffer.update_depth_texture(depth.clone());
+            self.sobel_backbuffer.update_sobel_texture(sobel(depth), SOBEL_SCALE);
         }
 
         if let Some(id) = self.backbuffer.id() {
@@ -169,8 +172,18 @@ impl ScenePanel {
             });
         }
 
-        if let Some(id) = self.depth_backbuffer.id() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+        let depth_or_sobel = self.sobel_backbuffer.id().is_some() || self.depth_backbuffer.id().is_some();
+        let depth_and_sobel = self.sobel_backbuffer.id().is_some() && self.depth_backbuffer.id().is_some();
+        let depth_xor_sobel = depth_or_sobel && !depth_and_sobel;
+
+        if depth_or_sobel {
+            ui.with_layout(
+            if depth_xor_sobel {
+                egui::Layout::right_to_left(egui::Align::TOP)
+            } else {
+                egui::Layout::left_to_right(egui::Align::TOP)
+            },
+            |ui| {
                 let max_height = ui.available_rect_before_wrap().height() -
                     ui.text_style_height(&egui::TextStyle::Body) * 2.0;
                 let size = match (size.y as f32) < max_height {
@@ -180,12 +193,21 @@ impl ScenePanel {
                         glam::vec2(size.x as f32 * scale, max_height)
                     }
                 };
-                let (depth_rect, _) = ui.allocate_exact_size(
-                    egui::Vec2::new(size.x, size.y),
-                    egui::Sense::empty(),
-                );
-    
-                ui.scope(|ui| {
+
+                let max_width = ui.available_rect_before_wrap().width();
+                let size = if depth_and_sobel && size.x > max_width / 2.0 {
+                    let scale = max_width / 2.0 / size.x;
+                    glam::vec2(max_width / 2.0, size.y * scale)
+                } else {
+                    size
+                };
+
+                if let Some(id) = self.depth_backbuffer.id() {
+                    let (depth_rect, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(size.x, size.y),
+                        egui::Sense::empty(),
+                    );
+
                     ui.painter().image(
                         id,
                         depth_rect,
@@ -195,7 +217,24 @@ impl ScenePanel {
                         },
                         Color32::WHITE,
                     );
-                });
+                }
+
+                if let Some(id) = self.sobel_backbuffer.id() {
+                    let (sobel_rect, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(size.x, size.y),
+                        egui::Sense::empty(),
+                    );
+
+                    ui.painter().image(
+                        id,
+                        sobel_rect,
+                        Rect {
+                            min: egui::pos2(0.0, 0.0),
+                            max: egui::pos2(1.0, 1.0),
+                        },
+                        Color32::WHITE,
+                    );
+                }
             });
         }
     }

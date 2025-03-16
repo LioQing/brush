@@ -31,6 +31,7 @@ pub(crate) struct DatasetPanel {
     view_type: ViewType,
     selected_view: Option<SelectedView>,
     selected_depth_view: Option<SelectedView>,
+    selected_sobel_view: Option<SelectedView>,
 }
 
 impl DatasetPanel {
@@ -39,6 +40,7 @@ impl DatasetPanel {
             view_type: ViewType::Train,
             selected_view: None,
             selected_depth_view: None,
+            selected_sobel_view: None,
         }
     }
 }
@@ -84,6 +86,7 @@ impl AppPanel for DatasetPanel {
                 let view = &pick_scene.views[*nearest];
                 let image = &view.image;
                 let img_size = [image.width() as usize, image.height() as usize];
+
                 let color_img = if image.color().has_alpha() {
                     let data = image.to_rgba8().into_vec();
                     egui::ColorImage::from_rgba_unmultiplied(img_size, &data)
@@ -112,8 +115,20 @@ impl AppPanel for DatasetPanel {
                         }
                     }
 
-                    let data = data.iter().map(|&x| x.to_le_bytes()).flatten().collect::<Vec<_>>();
+                    let data = data.iter().flat_map(|&x| x.to_le_bytes()).collect::<Vec<_>>();
 
+                    Some(egui::ColorImage::from_rgba_unmultiplied(img_size, &data))
+                } else {
+                    None
+                };
+                let sobel_img = if let Some(sobel) = view.sobel.as_ref() {
+                    let data = sobel
+                        .to_luma8()
+                        .into_vec()
+                        .iter()
+                        .map(|&x| 0xff000000u32 | (x as u32) << 16 | (x as u32) << 8 | x as u32)
+                        .flat_map(|x| x.to_le_bytes())
+                        .collect::<Vec<_>>();
                     Some(egui::ColorImage::from_rgba_unmultiplied(img_size, &data))
                 } else {
                     None
@@ -134,6 +149,15 @@ impl AppPanel for DatasetPanel {
                     texture_handle: ui.ctx().load_texture(
                         "nearest_depth_view_tex",
                         depth_img,
+                        TextureOptions::default(),
+                    ),
+                });
+                self.selected_sobel_view = sobel_img.map(|sobel_img| SelectedView {
+                    index: *nearest,
+                    view_type: self.view_type,
+                    texture_handle: ui.ctx().load_texture(
+                        "nearest_sobel_view_tex",
+                        sobel_img,
                         TextureOptions::default(),
                     ),
                 });
@@ -175,27 +199,64 @@ impl AppPanel for DatasetPanel {
                     egui::Color32::WHITE,
                 );
 
-                if let Some(selected_depth) = self.selected_depth_view.as_ref() {
-                    let max_height = ui.available_rect_before_wrap().height() -
-                        ui.text_style_height(&egui::TextStyle::Body) * 2.0;
-                    let size = match size.y < max_height {
-                        true => size,
-                        false => {
-                            let scale = max_height / size.y;
-                            egui::vec2(size.x * scale, max_height)
-                        }
-                    };
-                    let (depth_rect, _) = ui.allocate_exact_size(
-                        egui::vec2(size.x, size.y),
-                        egui::Sense::empty(),
-                    );
+                let depth_or_sobel = self.selected_depth_view.is_some() || self.selected_sobel_view.is_some();
+                let depth_and_sobel = self.selected_depth_view.is_some() && self.selected_sobel_view.is_some();
+                let depth_xor_sobel = depth_or_sobel && !depth_and_sobel;
 
-                    ui.painter().image(
-                        selected_depth.texture_handle.id(),
-                        depth_rect,
-                        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
+                if depth_or_sobel {
+                    ui.with_layout(
+                    if depth_xor_sobel {
+                        egui::Layout::right_to_left(egui::Align::TOP)
+                    } else {
+                        egui::Layout::left_to_right(egui::Align::TOP)
+                    },
+                    |ui| {
+                        let max_height = ui.available_rect_before_wrap().height() -
+                            ui.text_style_height(&egui::TextStyle::Body) * 2.0;
+                        let size = match size.y < max_height {
+                            true => size,
+                            false => {
+                                let scale = max_height / size.y;
+                                egui::vec2(size.x * scale, max_height)
+                            }
+                        };
+
+                        let max_width = ui.available_rect_before_wrap().width();
+                        let size = if depth_and_sobel && size.x > max_width / 2.0 {
+                            let scale = max_width / 2.0 / size.x;
+                            egui::vec2(max_width / 2.0, size.y * scale)
+                        } else {
+                            size
+                        };
+
+                        if let Some(selected_depth) = self.selected_depth_view.as_ref() {
+                            let (depth_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(size.x, size.y),
+                                egui::Sense::empty(),
+                            );
+
+                            ui.painter().image(
+                                selected_depth.texture_handle.id(),
+                                depth_rect,
+                                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+
+                        if let Some(selected_sobel) = self.selected_sobel_view.as_ref() {
+                            let (sobel_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(size.x, size.y),
+                                egui::Sense::empty(),
+                            );
+
+                            ui.painter().image(
+                                selected_sobel.texture_handle.id(),
+                                sobel_rect,
+                                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    });
                 }
 
                 ui.horizontal(|ui| {

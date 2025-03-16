@@ -29,6 +29,7 @@ use crate::stats::RefineRecord;
 use clap::Args;
 
 const MIN_OPACITY: f32 = 0.9 / 255.0;
+pub const SOBEL_SCALE: f32 = 1.0;
 
 #[derive(Config, Args)]
 pub struct TrainConfig {
@@ -137,6 +138,7 @@ pub struct SceneBatch<B: Backend> {
     pub gt_image: Tensor<B, 3>,
     pub gt_view: SceneView,
     pub gt_depth: Option<Tensor<B, 2>>,
+    pub gt_sobel: Option<Tensor<B, 2>>,
 }
 
 #[derive(Clone)]
@@ -222,6 +224,30 @@ fn quaternion_vec_multiply<B: Backend>(
 
 pub fn inv_sigmoid<B: Backend>(x: Tensor<B, 1>) -> Tensor<B, 1> {
     (x.clone() / (-x + 1.0)).log()
+}
+
+pub fn sobel<B: Backend>(x: Tensor<B, 2>) -> Tensor<B, 2> {
+    // Result will be dims [h - 2, w - 2]
+    let [h, w] = x.dims();
+    let xtl = x.clone().slice([0..h - 2, 0..w - 2]);
+    let xt = x.clone().slice([0..h - 2, 1..w - 1]);
+    let xtr = x.clone().slice([0..h - 2, 2..w]);
+    let xl = x.clone().slice([1..h - 1, 0..w - 2]);
+    let xr = x.clone().slice([1..h - 1, 2..w]);
+    let xbl = x.clone().slice([2..h, 0..w - 2]);
+    let xb = x.clone().slice([2..h, 1..w - 1]);
+    let xbr = x.clone().slice([2..h, 2..w]);
+
+    let gx = (
+        -xtl.clone() - xl.clone() * 2.0 - xbl.clone() +
+        xtr.clone() + xr.clone() * 2.0 + xbr.clone()
+    ) / 8.0;
+    let gy = (
+        -xtl.clone() - xt.clone() * 2.0 - xtr.clone() +
+        xbl.clone() + xb.clone() * 2.0 + xbr.clone()
+    ) / 8.0;
+
+    (gx.powf_scalar(2.0) + gy.powf_scalar(2.0)).sqrt()
 }
 
 fn create_default_optimizer() -> OptimizerType {
@@ -316,11 +342,27 @@ impl SplatTrainer {
             let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
             let gt_depth = gt_depth.clone().slice([0..img_h, 0..img_w]);
 
-            let depth_err = pred_depth - gt_depth;
-            let depth_err_sq = depth_err.powf_scalar(2.0);
-            total_err + depth_err_sq.reshape([0, 0, 1]).repeat_dim(2, 3)
+            let depth_err = (pred_depth - gt_depth).abs();
+            //println!("depth_err: {} / {}", depth_err.clone().mean().into_scalar(), total_err.clone().max().into_scalar());
+            total_err + depth_err.reshape([0, 0, 1]).repeat_dim(2, 3)
         } else {
             total_err
+        };
+
+        let loss = if let Some(gt_sobel) = &batch.gt_sobel {
+            let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
+            let pred_sobel = sobel(pred_depth) * SOBEL_SCALE;
+            let gt_sobel = gt_sobel.clone() * SOBEL_SCALE;
+
+            let sobel_err = Tensor::zeros([img_h, img_w], &splats.device())
+                .slice_assign(
+                    [1..img_h - 1, 1..img_w - 1],
+                    (pred_sobel - gt_sobel).abs(),
+                );
+            // println!("sobel_err: {} / {}", sobel_err.clone().mean().into_scalar(), loss.clone().mean().into_scalar());
+            loss + sobel_err.reshape([0, 0, 1]).repeat_dim(2, 3)
+        } else {
+            loss
         };
 
         let loss = if batch.gt_view.image.color().has_alpha() {

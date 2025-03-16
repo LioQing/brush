@@ -58,6 +58,7 @@ fn spawn_train_loop(
             gt_image: view_to_sample(&gt_view, &device).unsqueeze(),
             gt_view,
             gt_depth: None,
+            gt_sobel: None,
         };
 
         let mut iter = 0;
@@ -125,6 +126,7 @@ impl App {
             image: Arc::new(image),
             img_type: ViewImageType::Alpha,
             depth: None,
+            sobel: None,
         };
 
         let (sender, receiver) = tokio::sync::mpsc::channel(32);

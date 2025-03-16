@@ -189,6 +189,7 @@ fn read_transforms_file(
                     image,
                     img_type,
                     depth: None,
+                    sobel: None,
                 };
                 anyhow::Result::<SceneView>::Ok(view)
             }

@@ -1,6 +1,6 @@
 use brush_train::image::{try_view_to_depth, view_to_sample};
 use brush_train::scene::Scene;
-use brush_train::train::SceneBatch;
+use brush_train::train::{sobel, SceneBatch};
 use burn::prelude::Backend;
 use rand::{SeedableRng, seq::SliceRandom};
 use tokio::sync::mpsc;
@@ -24,7 +24,7 @@ impl<B: Backend> SceneLoader<B> {
             let mut shuf_indices = vec![];
 
             loop {
-                let (gt_image, gt_depth, gt_view) = {
+                let (gt_image, gt_view, gt_depth, gt_sobel) = {
                     let index = shuf_indices.pop().unwrap_or_else(|| {
                         shuf_indices = (0..scene.views.len()).collect();
                         shuf_indices.shuffle(&mut rng);
@@ -33,10 +33,11 @@ impl<B: Backend> SceneLoader<B> {
                             .expect("Need at least one view in dataset")
                     });
                     let view = scene.views[index].clone();
-                    (view_to_sample(&view, &device), try_view_to_depth(&view, &device), view)
+                    let depth = try_view_to_depth(&view, &device);
+                    (view_to_sample(&view, &device), view, depth.clone(), depth.map(sobel))
                 };
 
-                let scene_batch = SceneBatch { gt_image, gt_view, gt_depth };
+                let scene_batch = SceneBatch { gt_image, gt_view, gt_depth, gt_sobel };
 
                 if tx.send(scene_batch).await.is_err() {
                     break;

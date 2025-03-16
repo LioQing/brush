@@ -15,8 +15,8 @@ use brush_render::{
     gaussian_splats::Splats,
     sh::rgb_to_sh,
 };
-use brush_train::scene::SceneView;
-use burn::prelude::Backend;
+use brush_train::{scene::SceneView, train};
+use burn::{prelude::Backend, tensor::{Float, Int, Tensor, TensorData}};
 use glam::Vec3;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
@@ -71,9 +71,10 @@ fn find_img_mask_depth(vfs: &BrushVfs, paths: &[PathBuf]) -> Result<(PathBuf, Op
         .context("No candidates found")
 }
 
-async fn read_views(
+async fn read_views<B: Backend>(
     vfs: BrushVfs,
     load_args: LoadDataseConfig,
+    device: B::Device,
 ) -> Result<Vec<impl Future<Output = Result<SceneView>>>> {
     log::info!("Loading colmap dataset");
     let mut vfs = vfs;
@@ -116,6 +117,7 @@ async fn read_views(
         .map(move |(_, img_info)| {
             let cam_data = cam_model_data[&img_info.camera_id].clone();
             let mut vfs = vfs.clone();
+            let device = device.clone();
 
             // Create a future to handle loading the image.
             async move {
@@ -151,8 +153,44 @@ async fn read_views(
                     )
                 } else { None };
 
+                let sobel = if let Some(depth) = &depth {
+                    let h = depth.height() as usize;
+                    let w = depth.width() as usize;
+                    let sobel = Tensor::<B, 2, Float>::from_data(
+                        TensorData::new(
+                            depth
+                                .to_luma16()
+                                .to_vec()
+                                .into_iter()
+                                .map(|x| x as f32 / 1000.0 * train::SOBEL_SCALE)
+                                .collect(),
+                            [h, w],
+                        ),
+                        &device,
+                    );
+                    let sobel = train::sobel(sobel);
+                    let sobel = Tensor::zeros([h, w], &device).slice_assign([1..h - 1, 1..w - 1], sobel);
+                    let sobel = Tensor::<B, 2, Float>::from_data(
+                        (-(-sobel.clone()).exp() + 1.0).into_data(),
+                        &device,
+                    );
+                    let sobel = Tensor::<B, 2, Int>::from_data(
+                        (sobel.clone().clamp(0.0, 1.0) * 65535.0).into_data(),
+                        &sobel.device(),
+                    );
+
+                    image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_vec(
+                        sobel.dims()[1] as u32,
+                        sobel.dims()[0] as u32,
+                        sobel.into_data().convert::<u16>().to_vec().expect("sobel tensor to vector"),
+                    )
+                } else {
+                    None
+                };
+
                 let image = clamp_img_to_max_size(Arc::new(image), load_args.max_resolution);
                 let depth = depth.map(|d| clamp_img_to_max_size(Arc::new(d), load_args.max_resolution));
+                let sobel = sobel.map(|s| clamp_img_to_max_size(Arc::new(s.into()), load_args.max_resolution));
 
                 // Convert w2c to c2w.
                 let world_to_cam =
@@ -168,6 +206,7 @@ async fn read_views(
                     image,
                     img_type,
                     depth,
+                    sobel,
                 };
                 Ok(view)
             }
@@ -182,7 +221,7 @@ pub(crate) async fn load_dataset<B: Backend>(
     load_args: &LoadDataseConfig,
     device: &B::Device,
 ) -> Result<(DataStream<SplatMessage<B>>, DataStream<Dataset>)> {
-    let mut handles = read_views(vfs.clone(), load_args.clone()).await?;
+    let mut handles = read_views::<B>(vfs.clone(), load_args.clone(), device.clone()).await?;
 
     if let Some(subsample) = load_args.subsample_frames {
         handles = handles.into_iter().step_by(subsample as usize).collect();
