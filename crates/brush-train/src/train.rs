@@ -316,9 +316,9 @@ impl SplatTrainer {
             let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
             let gt_depth = gt_depth.clone().slice([0..img_h, 0..img_w]);
 
-            let depth_err = (pred_depth - gt_depth).abs();
-            // println!("Depth/RGB error: {}/{}", depth_err.clone().mean().into_scalar(), total_err.clone().mean().into_scalar());
-            total_err + depth_err.reshape([0, 0, 1]).repeat_dim(2, 3)
+            let depth_err = pred_depth - gt_depth;
+            let depth_err_sq = depth_err.powf_scalar(2.0);
+            total_err + depth_err_sq.reshape([0, 0, 1]).repeat_dim(2, 3)
         } else {
             total_err
         };

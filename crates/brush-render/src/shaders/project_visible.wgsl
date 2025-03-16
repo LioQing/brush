@@ -247,7 +247,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let depth_pt_dir = -viewdir;
     let depth_pt_inv_rotated = transpose(helpers::quat_to_mat(quat)) * depth_pt_dir;
     let depth_pt_inv_scaled = depth_pt_inv_rotated.xyz / scale;
-    let depth_pt_recip = 1.0 / dot(depth_pt_inv_scaled, depth_pt_inv_scaled);
+    let depth_pt_recip = 1.0 / length(depth_pt_inv_scaled);
     let depth_pt = mean + depth_pt_dir * depth_pt_recip * depth_pt_std_score;
     let depth = length(depth_pt - uniforms.camera_position.xyz);
 

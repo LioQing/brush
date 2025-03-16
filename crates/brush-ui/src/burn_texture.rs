@@ -41,9 +41,9 @@ fn create_texture(size: glam::UVec2, device: &wgpu::Device) -> wgpu::Texture {
 impl BurnTexture {
     pub const DEPTH_GRADIENTS: &'static [(f32, glam::Vec3)] = &[
         (0.0, glam::vec3(192.0, 192.0, 192.0)),
-        (1.0, glam::vec3(192.0, 0.0, 0.0)),
+        (1.0, glam::vec3(0.0, 0.0, 192.0)),
         (2.0, glam::vec3(0.0, 192.0, 0.0)),
-        (4.0, glam::vec3(0.0, 0.0, 192.0)),
+        (4.0, glam::vec3(192.0, 0.0, 0.0)),
         (8.0, glam::vec3(0.0, 0.0, 0.0)),
     ];
 
