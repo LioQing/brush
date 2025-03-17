@@ -86,6 +86,7 @@ fn persp_proj_vjp(
     // grad outputs
     v_cov2d: mat2x2f,
     v_mean2d: vec2f,
+    v_depth: f32
 ) -> vec3f {
     let x = mean3d.x;
     let y = mean3d.y;
@@ -139,9 +140,7 @@ fn persp_proj_vjp(
                   2.f * focal.x * tx * rz3 * v_J[2][0] +
                   2.f * focal.y * ty * rz3 * v_J[2][1];
 
-    // add contribution from v_depths
-    // Disabled as there is no depth supervision currently.
-    // v_mean3d.z += v_depths[0];
+    v_mean3d.z += v_depth;
 
     return v_mean3d;
 }
@@ -166,8 +165,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // Safe to normalize, quats with norm 0 are invisible.
     let quat = normalize(quat_unorm);
 
-    let v_mean2d = vec2f(v_grads[compact_gid * 9 + 0], v_grads[compact_gid * 9 + 1]);
-    let v_conics = vec3f(v_grads[compact_gid * 9 + 2], v_grads[compact_gid * 9 + 3], v_grads[compact_gid * 9 + 4]);
+    let v_mean2d = vec2f(v_grads[compact_gid * 10 + 0], v_grads[compact_gid * 10 + 1]);
+    let v_conics = vec3f(v_grads[compact_gid * 10 + 2], v_grads[compact_gid * 10 + 3], v_grads[compact_gid * 10 + 4]);
+    let v_depth = v_grads[compact_gid * 10 + 9];
 
     let R = mat3x3f(viewmat[0].xyz, viewmat[1].xyz, viewmat[2].xyz);
     let mean_c = R * mean + viewmat[3].xyz;
@@ -191,7 +191,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
     // persp_proj_vjp
     let J = helpers::calc_cam_J(mean_c, focal, img_size, pixel_center);
-    let v_mean_c = persp_proj_vjp(J, mean_c, covar_c, focal, pixel_center, img_size, v_covar2d, v_mean2d);
+    let v_mean_c = persp_proj_vjp(J, mean_c, covar_c, focal, pixel_center, img_size, v_covar2d, v_mean2d, v_depth);
     // cov = J * V * Jt; G = df/dcov = v_cov
     // -> df/dV = Jt * G * J
     // -> df/dJ = G * J * Vt + Gt * J * V
@@ -231,7 +231,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         dot(rotmat[1], v_M[1]),
         dot(rotmat[2], v_M[2]),
     );
-    let v_scale_exp = v_scale * scale;
+    let v_depth_scale_influence = vec3f(0.0, 0.0, v_depth);
+    let v_scale_with_depth = v_scale + v_depth_scale_influence * scale;
+    let v_scale_exp = v_scale_with_depth * scale;
 
     // grad for (quat, scale) from covar
     let v_quat = normalize_vjp(quat_unorm) * quat_to_mat_vjp(quat, v_M * S);

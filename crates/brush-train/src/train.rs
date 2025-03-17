@@ -312,32 +312,21 @@ impl SplatTrainer {
             l1_rgb
         };
 
-        let loss = if let Some(gt_depth) = &batch.gt_depth {
-            let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
-            let gt_depth = gt_depth.clone().slice([0..img_h, 0..img_w]);
-
-            let depth_err = pred_depth - gt_depth;
-            let depth_err_sq = depth_err.powf_scalar(2.0);
-            total_err + depth_err_sq.reshape([0, 0, 1]).repeat_dim(2, 3)
-        } else {
-            total_err
-        };
-
         let loss = if batch.gt_view.image.color().has_alpha() {
             let alpha_input = batch.gt_image.clone().slice([0..img_h, 0..img_w, 3..4]);
 
             match batch.gt_view.img_type {
                 // In masked mode, weigh the errors by the alpha channel.
-                ViewImageType::Masked => (loss * alpha_input).mean(),
+                ViewImageType::Masked => (total_err * alpha_input).mean(),
                 // In alpha mode, add the l1 error of the alpha channel to the total error.
                 ViewImageType::Alpha => {
                     let pred_alpha = pred_image.clone().slice([0..img_h, 0..img_w, 3..4]);
-                    loss.mean()
+                    total_err.mean()
                         + (alpha_input - pred_alpha).abs().mean() * self.config.match_alpha_weight
                 }
             }
         } else {
-            loss.mean()
+            total_err.mean()
         };
 
         let opac_loss_weight = self.config.opac_loss_weight;
@@ -349,6 +338,17 @@ impl SplatTrainer {
             // they would never die off.
             let visible = visible.clone() + 1e-3;
             loss + (current_opacity * visible).sum() * (opac_loss_weight * (1.0 - train_t))
+        } else {
+            loss
+        };
+
+        let loss = if let Some(gt_depth) = &batch.gt_depth {
+            let pred_depth = pred_depth.clone().slice([0..img_h, 0..img_w]);
+            let gt_depth = gt_depth.clone().slice([0..img_h, 0..img_w]);
+
+            let depth_err = (pred_depth - gt_depth).abs().mean();
+            // println!("{} / {}", depth_err.clone().into_scalar(), loss.clone().mean().into_scalar());
+            loss + depth_err
         } else {
             loss
         };

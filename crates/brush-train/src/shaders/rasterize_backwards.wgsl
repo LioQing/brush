@@ -154,6 +154,7 @@ fn main(
             var v_conic = vec3f(0.0);
             var v_colors = vec4f(0.0);
             var v_refine = vec2f(0.0);
+            var v_depth = 0.0;
 
             var splat_active = false;
 
@@ -163,6 +164,7 @@ fn main(
                 let xy = vec2f(projected.xy_x, projected.xy_y);
                 let conic = vec3f(projected.conic_x, projected.conic_y, projected.conic_z);
                 let color = vec4f(projected.color_r, projected.color_g, projected.color_b, projected.color_a);
+                let depth = projected.depth;
 
                 let delta = xy - pixel_coord;
                 let sigma = 0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) + conic.y * delta.x * delta.y;
@@ -203,6 +205,8 @@ fn main(
                     v_colors = vec4f(v_rgb, vis * v_alpha);
 
                     v_refine = abs(v_xy);
+
+                    v_depth = depth * fac;
                 }
             }
 
@@ -210,6 +214,7 @@ fn main(
             let v_conic_sum = subgroupAdd(v_conic);
             let v_colors_sum = subgroupAdd(v_colors);
             let v_refine_sum = subgroupAdd(v_refine);
+            let v_depth_sum = subgroupAdd(v_depth);
 
             // Queue a new gradient if this subgroup has any.
             // The gradient is sum of all gradients in the subgroup.
@@ -217,28 +222,30 @@ fn main(
                 let compact_gid = local_id[t];
 
                 switch subgroup_invocation_id {
-                    case 0u:  { write_grads_atomic(compact_gid * 9 + 0, v_xy_sum.x); }
-                    case 1u:  { write_grads_atomic(compact_gid * 9 + 1, v_xy_sum.y); }
-                    case 2u:  { write_grads_atomic(compact_gid * 9 + 2, v_conic_sum.x); }
-                    case 3u:  { write_grads_atomic(compact_gid * 9 + 3, v_conic_sum.y); }
-                    case 4u:  { write_grads_atomic(compact_gid * 9 + 4, v_conic_sum.z); }
-                    case 5u:  { write_grads_atomic(compact_gid * 9 + 5, v_colors_sum.x); }
-                    case 6u:  { write_grads_atomic(compact_gid * 9 + 6, v_colors_sum.y); }
+                    case 0u:  { write_grads_atomic(compact_gid * 10 + 0, v_xy_sum.x); }
+                    case 1u:  { write_grads_atomic(compact_gid * 10 + 1, v_xy_sum.y); }
+                    case 2u:  { write_grads_atomic(compact_gid * 10 + 2, v_conic_sum.x); }
+                    case 3u:  { write_grads_atomic(compact_gid * 10 + 3, v_conic_sum.y); }
+                    case 4u:  { write_grads_atomic(compact_gid * 10 + 4, v_conic_sum.z); }
+                    case 5u:  { write_grads_atomic(compact_gid * 10 + 5, v_colors_sum.x); }
+                    case 6u:  { write_grads_atomic(compact_gid * 10 + 6, v_colors_sum.y); }
                     case 7u:  {
-                        write_grads_atomic(compact_gid * 9 + 7, v_colors_sum.z);
+                        write_grads_atomic(compact_gid * 10 + 7, v_colors_sum.z);
 
                         // Subgroups of size 8 need to be handled separately as there's not enough threads to write
                         // all the gaussian fields. The next size (16) is fine.
                         if subgroup_size == 8u {
-                            write_grads_atomic(compact_gid * 9 + 8, v_colors_sum.w);
+                            write_grads_atomic(compact_gid * 10 + 8, v_colors_sum.w);
+                            write_grads_atomic(compact_gid * 10 + 9, v_depth_sum);
                             write_refine_atomic(compact_gid * 2 + 0, v_refine_sum.x);
                             write_refine_atomic(compact_gid * 2 + 1, v_refine_sum.y);
                         }
                     }
 
-                    case 8u:  { write_grads_atomic(compact_gid * 9 + 8, v_colors_sum.w); }
-                    case 9u:  { write_refine_atomic(compact_gid * 2 + 0, v_refine_sum.x); }
-                    case 10u: { write_refine_atomic(compact_gid * 2 + 1, v_refine_sum.y); }
+                    case 8u:  { write_grads_atomic(compact_gid * 10 + 8, v_colors_sum.w); }
+                    case 9u:  { write_grads_atomic(compact_gid * 10 + 9, v_depth_sum); }
+                    case 10u: { write_refine_atomic(compact_gid * 2 + 0, v_refine_sum.x); }
+                    case 11u: { write_refine_atomic(compact_gid * 2 + 1, v_refine_sum.y); }
                     default: {}
                 }
             }

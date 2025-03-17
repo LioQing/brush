@@ -169,8 +169,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     // Load colors gradients.
-    let v_color = vec3f(v_grads[compact_gid * 9 + 5], v_grads[compact_gid * 9 + 6], v_grads[compact_gid * 9 + 7]);
-    let v_opac = v_grads[compact_gid * 9 + 8];
+    let v_color = vec3f(v_grads[compact_gid * 10 + 5], v_grads[compact_gid * 10 + 6], v_grads[compact_gid * 10 + 7]);
+    let v_opac = v_grads[compact_gid * 10 + 8];
 
     // Convert RGB to global SH gradients.
     let global_gid = global_from_compact_gid[compact_gid];
